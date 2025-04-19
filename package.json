@@ -1,0 +1,28 @@
+{
+	"name": "openai",
+	"version": "1.0.0",
+	"main": "index.js",
+	"type": "module",
+	"scripts": {
+		"build": "tsc",
+		"start": "node dist/mini-apps/weather-app.js",
+		"dev:weather": "npm run build && node dist/mini-apps/weather-app.js",
+		"dev:flashcards": "npm run build && node dist/mini-apps/flashcard-forge.js",
+		"dev:recipe": "npm run build && node dist/mini-apps/json-recipe-creator.js",
+		"dev:poet": "npm run build && node dist/mini-apps/mood-morph-poet.js",
+		"dev:story": "npm run build && node dist/mini-apps/tiny-tale-tuner.js",
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"description": "",
+	"dependencies": {
+		"dotenv": "^16.5.0",
+		"openai": "^4.95.1"
+	},
+	"devDependencies": {
+		"@types/node": "^22.14.1",
+		"typescript": "^5.8.3"
+	}
+}
