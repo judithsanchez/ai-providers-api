@@ -1,6 +1,8 @@
-import {AIProvider} from '../core/ai-provider.js'; // Import provider interface
-import {openaiClient} from '../core/openai-provider.js'; // Import concrete provider
-import {rl, askQuestion} from '../core/cli-utils.js'; // Import shared CLI utils
+import {AIProvider} from '../core/ai-provider.js';
+import {OpenAIProvider} from '../core/openai-provider.js';
+import {DeepseekProvider} from '../core/deepseek-provider.js';
+import {GeminiProvider} from '../core/gemini-provider.js';
+import {askQuestion} from '../core/cli-utils.js'; // Import shared CLI utils
 import {
 	ChatCompletionCreateParamsBase,
 	ChatCompletion, // Import the specific type
@@ -34,6 +36,30 @@ interface FlashcardResponse {
 	};
 }
 
+// --- Helper Function to Select Provider (Copied from weather-app.ts) ---
+function getSelectedProvider(): AIProvider {
+	const args = process.argv.slice(2); // Get arguments passed to the script
+	const providerArg = args.find(arg => arg.startsWith('--provider='));
+	let providerName = 'openai'; // Default provider
+
+	if (providerArg) {
+		providerName = providerArg.split('=')[1]?.toLowerCase();
+	}
+
+	console.log(`Using AI Provider: ${providerName}`); // Log selected provider
+
+	if (providerName === 'deepseek') {
+		return new DeepseekProvider();
+	} else if (providerName === 'gemini') {
+		return new GeminiProvider();
+	} else if (providerName === 'openai') {
+		return new OpenAIProvider();
+	} else {
+		console.warn(`Unknown provider "${providerName}". Defaulting to OpenAI.`);
+		return new OpenAIProvider(); // Default fallback
+	}
+}
+
 // --- Core Logic ---
 async function generateFlashcards(
 	aiProvider: AIProvider,
@@ -42,8 +68,12 @@ async function generateFlashcards(
 	numCards: number,
 	style: Style,
 ): Promise<FlashcardResponse> {
+	// Get the default model from the provider to satisfy the type
+	const providerInfo = aiProvider.getProviderInfo();
+	const modelToUse = providerInfo.supportedModels[0] ?? 'unknown-model'; // Fallback just in case
+
 	const config: ChatCompletionCreateParamsBase = {
-		model: 'gpt-4o-mini', // Updated model
+		model: modelToUse, // Use the model from the provider
 		messages: [
 			{
 				role: 'system',
@@ -128,6 +158,10 @@ IMPORTANT: Respond ONLY with a valid JSON object in this exact format. Ensure al
 // --- Main Execution ---
 async function main() {
 	console.log('--- Flashcard Forge ---');
+
+	// Select and instantiate the provider based on CLI args
+	const aiProvider = getSelectedProvider();
+
 	try {
 		const topic = await askQuestion('Enter topic: ');
 		const difficultyInput = await askQuestion(
@@ -153,7 +187,7 @@ async function main() {
 		console.log('\nGenerating flashcards...\n');
 
 		const result = await generateFlashcards(
-			openaiClient,
+			aiProvider, // Use the selected provider
 			topic,
 			difficulty,
 			numCards,

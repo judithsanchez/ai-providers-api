@@ -1,50 +1,94 @@
 import {AIProvider} from '../core/ai-provider.js';
-import {openaiClient} from '../core/openai-provider.js'; // Import provider
-import {rl, askQuestion} from '../core/cli-utils.js'; // Import shared CLI utils
-import {WeatherService} from './weather-service.js'; // Import the service
+import {OpenAIProvider} from '../core/openai-provider.js';
+import {DeepseekProvider} from '../core/deepseek-provider.js';
+import {GeminiProvider} from '../core/gemini-provider.js'; // Import GeminiProvider
+import {askQuestion} from '../core/cli-utils.js';
+import {WeatherService, TurnResult} from './weather-service.js';
 
-// Architectural Pattern: CLI Application Layer - Handles user interaction and orchestrates service calls.
+// Architectural Pattern: CLI Application Layer - Handles user interaction loop and state.
+
+// --- Helper Function to Select Provider ---
+function getSelectedProvider(): AIProvider {
+	const args = process.argv.slice(2); // Get arguments passed to the script
+	const providerArg = args.find(arg => arg.startsWith('--provider='));
+	let providerName = 'openai'; // Default provider
+
+	if (providerArg) {
+		providerName = providerArg.split('=')[1]?.toLowerCase();
+	}
+
+	console.log(`Using AI Provider: ${providerName}`); // Log selected provider
+
+	if (providerName === 'deepseek') {
+		return new DeepseekProvider();
+	} else if (providerName === 'gemini') {
+		return new GeminiProvider();
+	} else if (providerName === 'openai') {
+		return new OpenAIProvider();
+	} else {
+		console.warn(`Unknown provider "${providerName}". Defaulting to OpenAI.`);
+		return new OpenAIProvider(); // Default fallback
+	}
+}
 
 // --- Main Application Logic ---
 async function main() {
-	console.log('--- Real Weather App (Open-Meteo) ---');
+	console.log('--- Conversational Weather App ---');
+	console.log("Ask for weather by city, or type '/quit' to exit.");
 
-	// Instantiate the service, injecting the AI provider
-	const weatherService = new WeatherService(openaiClient);
+	// Select and instantiate the provider based on CLI args
+	const aiProvider = getSelectedProvider();
 
-	let cityInput = ''; // Initialize cityInput
+	// Instantiate the service, injecting the selected AI provider
+	const weatherService = new WeatherService(aiProvider);
+
+	let currentContext: string | null = null; // Holds the weather summary context
+	let userInput: string = ''; // Start with empty input to trigger initial AI prompt
+	let isFirstTurn = true; // Flag for the initial turn
 
 	while (true) {
-		// Ask for city only if it's not provided from the previous iteration's follow-up prompt
-		if (!cityInput) {
-			cityInput = await askQuestion('\nEnter city name (or /quit): ');
-		}
+		// Use a default prompt for the very first turn if user input is empty
+		const inputForAI = isFirstTurn && userInput === '' ? 'Hello' : userInput;
+		isFirstTurn = false; // Reset flag after the first turn
 
-		if (cityInput.toLowerCase() === '/quit') {
-			break; // Exit loop if user types /quit
-		}
-
-		if (!cityInput.trim()) {
-			console.log('Please enter a city name.');
-			cityInput = ''; // Reset cityInput to ask again
-			continue; // Ask again if input is empty
-		}
-
-		// Delegate processing to the service using the city name directly
-		console.log(`Fetching weather for ${cityInput}...`); // Add feedback
-		const weatherResult = await weatherService.processUserQuery(cityInput);
-
-		// Display the final result from the service
-		console.log('\nWeather Result:', weatherResult);
-
-		// Ask for next action (follow-up city or quit)
-		const nextAction = await askQuestion(
-			'\nEnter another city name, or type /quit: ',
+		// Handle the conversation turn. Pass null context initially.
+		const result: TurnResult = await weatherService.handleConversationTurn(
+			inputForAI, // Use the potentially modified input
+			currentContext,
 		);
-		if (nextAction.toLowerCase() === '/quit') {
-			break; // Exit loop if user types /quit
+
+		// Display the result from the service
+		if (result.type === 'weather') {
+			console.log(`\n☀️ ${result.summary}\n`);
+			currentContext = result.summary!; // Update context
+		} else if (result.text) {
+			console.log(`\n🤖 ${result.text}\n`);
+			// Update context based on result type
+			if (
+				result.type === 'question' ||
+				result.type === 'info' ||
+				result.type === 'error'
+			) {
+				// Context is lost or wasn't established if AI asks question or gives info/error
+				currentContext = null;
+			}
+			// If type is 'answer', context remains unchanged
 		} else {
-			cityInput = nextAction; // Use this input as the city for the next iteration
+			console.log('\n🤖 Sorry, something went wrong.\n');
+			currentContext = null; // Reset context on unexpected empty result
+		}
+
+		// Get the next user input
+		userInput = await askQuestion('> ');
+
+		if (userInput.toLowerCase() === '/quit') {
+			break; // Exit loop if user types /quit
+		}
+
+		if (!userInput.trim()) {
+			console.log('Please enter a city or ask a question.');
+			userInput = ''; // Set to empty to potentially re-trigger AI prompt if needed
+			continue; // Ask again
 		}
 	}
 

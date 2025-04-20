@@ -1,8 +1,9 @@
-import {AIProvider} from '../core/ai-provider.js';
+import {AIProvider, ChatResponse} from '../core/ai-provider.js';
 import {ChatCompletionMessageParam} from 'openai/resources/chat/completions';
+import {extractCityNameSimple} from '../core/cli-utils.js'; // Assuming a helper exists or will be added
 
-// Architectural Pattern: Service Layer - Encapsulates business logic related to weather queries.
-// Architectural Pattern: Dependency Injection - OpenAI client is injected via the constructor.
+// Architectural Pattern: Service Layer - Encapsulates weather logic and AI interaction.
+// Architectural Pattern: Dependency Injection - AI provider is injected.
 
 // Define interfaces for API responses (basic structure)
 interface GeocodeResult {
@@ -18,25 +19,28 @@ interface WeatherResult {
 	// Add other fields as needed based on API parameters
 }
 
+// Define the structure for the return value of handleConversationTurn
+export interface TurnResult {
+	type: 'weather' | 'question' | 'answer' | 'info' | 'error';
+	text?: string; // For questions, answers, info, errors
+	summary?: string; // For weather results
+}
+
 export class WeatherService {
 	private aiProvider: AIProvider;
-	private messages: ChatCompletionMessageParam[] = [];
-	// No tools needed anymore for simulation
+	private systemPrompt: string;
 
 	constructor(aiProvider: AIProvider) {
 		this.aiProvider = aiProvider;
-		this.messages = [
-			{
-				role: 'system',
-				content: `You are a helpful weather assistant. Your primary goal is to understand the user's request for weather information and extract the location (city name). Respond ONLY with the extracted city name, nothing else. If the user's input is not about weather or doesn't contain a clear location, respond with "UNKNOWN".`,
-			},
-		];
-		// Tools definition removed
+		// Updated system prompt for conversational flow - made more explicit for Deepseek
+		this.systemPrompt = `You are a friendly weather assistant.
+- If the user provides a city name, acknowledge it ONLY with the exact phrase: "Okay, fetching weather for [City Name]...". Do not add any other text or questions in this specific response.
+- If the user asks a question AND weather context is provided below, answer the question based ONLY on that context.
+- If the user asks a question but NO weather context is provided, or asks something unrelated to the provided context, politely state you need a city first or can only answer about the current weather context.
+- If no city is mentioned and no context is provided, ask the user "Which city would you like the weather for?".`;
 	}
 
-	// Stub function removed
-
-	// --- New methods for Open-Meteo ---
+	// --- Open-Meteo API Methods ---
 
 	private async getCoordinatesForCity(
 		cityName: string,
@@ -138,67 +142,119 @@ export class WeatherService {
 		return `Unknown (${code})`;
 	}
 
-	public async processUserQuery(userInput: string): Promise<string> {
-		// Don't add user message to this.messages yet, as it's only used for location extraction now.
-		// A separate history could be maintained for conversation context if needed later.
-		const extractionMessages: ChatCompletionMessageParam[] = [
-			...this.messages, // System prompt
-			{role: 'user', content: userInput},
+	// --- New Conversational Method ---
+	public async handleConversationTurn(
+		userInput: string,
+		currentContext: string | null,
+	): Promise<TurnResult> {
+		const messages: ChatCompletionMessageParam[] = [
+			{role: 'system', content: this.systemPrompt},
 		];
 
+		if (currentContext) {
+			messages.push({role: 'system', content: `CONTEXT: ${currentContext}`});
+		}
+		messages.push({role: 'user', content: userInput});
+
 		try {
-			// --- Step 1: Extract Location using OpenAI ---
-			console.log('AI Extracting Location...');
-			const response = await this.aiProvider.createChatCompletion({
-				model: 'gpt-4o-mini',
-				messages: extractionMessages,
-				temperature: 0,
-			});
-
-			const extractedLocation = response.content.trim();
-
-			if (!extractedLocation || extractedLocation === 'UNKNOWN') {
-				return "Sorry, I couldn't determine the location you're asking about. Please specify a city.";
+			// --- Step 1: Initial AI Call (Intent Check & Response Generation) ---
+			console.log('AI Processing turn...');
+			// Get the provider's default/preferred model
+			const providerInfo = this.aiProvider.getProviderInfo();
+			const modelToUse =
+				providerInfo.supportedModels[0] || 'default-model-error'; // Fallback needed
+			if (modelToUse === 'default-model-error') {
+				console.error("Provider doesn't list any supported models!");
+				// Handle error appropriately, maybe throw or return error TurnResult
 			}
 
-			console.log(`AI extracted location: ${extractedLocation}`);
+			const aiResponse: ChatResponse =
+				await this.aiProvider.createChatCompletion({
+					model: modelToUse, // Use the model reported by the provider
+					messages: messages,
+					temperature: 0.5, // Allow some creativity for conversation
+				});
+			const aiResponseText = aiResponse.content.trim();
+			console.log(`AI Response: ${aiResponseText}`);
 
-			// --- Step 2: Geocode the Location ---
-			const geoResult = await this.getCoordinatesForCity(extractedLocation);
-			if (!geoResult) {
-				return `Sorry, I couldn't find coordinates for "${extractedLocation}". Please check the spelling or try a different city.`;
-			}
-
-			// --- Step 3: Get Weather from Open-Meteo ---
-			const weatherResult = await this.getWeatherForCoordinates(
-				geoResult.latitude,
-				geoResult.longitude,
+			// --- Step 2: Check for City Mention / Fetch Trigger ---
+			// Simple check: Does the AI response indicate fetching?
+			const fetchTrigger = aiResponseText.startsWith(
+				'Okay, fetching weather for',
 			);
-			if (!weatherResult) {
-				return `Sorry, I couldn't fetch the current weather data for ${geoResult.name}.`;
+			// Simple check: Did the user input likely contain a city? (Refine this)
+			const potentialCity = extractCityNameSimple(userInput); // Use helper
+
+			let cityToFetch: string | null = null;
+
+			if (fetchTrigger) {
+				// Extract city from AI response (more reliable)
+				const match = aiResponseText.match(
+					/Okay, fetching weather for (.*?)\.\.\./,
+				);
+				if (match && match[1]) {
+					cityToFetch = match[1];
+				}
+			} else if (potentialCity && !currentContext) {
+				// If user likely gave a city and we don't have context yet, assume we should fetch
+				cityToFetch = potentialCity;
+				console.log(`User likely provided new city: ${cityToFetch}`);
 			}
 
-			// --- Step 4: Format the Response ---
-			const weatherDescription = this.interpretWeatherCode(
-				weatherResult.weathercode,
-			);
-			const formattedResponse = `The current weather in ${
-				geoResult.name
-			} is ${weatherDescription.toLowerCase()} with a temperature of ${
-				weatherResult.temperature
-			}°C and wind speed of ${weatherResult.windspeed} km/h.`;
+			// --- Step 3: Fetch Weather (If Needed) ---
+			if (cityToFetch) {
+				console.log(`Fetching weather for: ${cityToFetch}`);
+				const geoResult = await this.getCoordinatesForCity(cityToFetch);
+				if (!geoResult) {
+					return {
+						type: 'info',
+						text: `Sorry, I couldn't find coordinates for "${cityToFetch}". Please check the spelling or try again.`,
+					};
+				}
 
-			// Optional: Add the final interaction to a conversation history if needed
-			// this.messages.push({ role: 'user', content: userInput });
-			// this.messages.push({ role: 'assistant', content: formattedResponse });
+				const weatherResult = await this.getWeatherForCoordinates(
+					geoResult.latitude,
+					geoResult.longitude,
+				);
+				if (!weatherResult) {
+					return {
+						type: 'info',
+						text: `Sorry, I couldn't fetch the current weather data for ${geoResult.name}.`,
+					};
+				}
 
-			return formattedResponse;
+				const weatherDescription = this.interpretWeatherCode(
+					weatherResult.weathercode,
+				);
+				const formattedSummary = `The current weather in ${
+					geoResult.name
+				} is ${weatherDescription.toLowerCase()} with a temperature of ${
+					weatherResult.temperature
+				}°C and wind speed of ${weatherResult.windspeed} km/h.`;
+
+				return {type: 'weather', summary: formattedSummary};
+			}
+
+			// --- Step 4: Return AI's Response (Otherwise) ---
+			// Determine type based on AI response
+			if (aiResponseText.includes('Which city')) {
+				return {type: 'question', text: aiResponseText};
+			} else if (currentContext && !fetchTrigger) {
+				// If we had context and didn't fetch new weather, it's likely an answer
+				return {type: 'answer', text: aiResponseText};
+			} else {
+				// Default to info (includes errors, clarifications)
+				return {type: 'info', text: aiResponseText};
+			}
 		} catch (error) {
 			console.error(
-				'\nError during processing:',
+				'\nError during conversation turn:',
 				error instanceof Error ? error.message : String(error),
 			);
-			return 'An error occurred while processing your request.';
+			return {
+				type: 'error',
+				text: 'An error occurred while processing your request.',
+			};
 		}
 	}
 }

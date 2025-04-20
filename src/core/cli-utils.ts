@@ -34,4 +34,52 @@ process.on('exit', () => {
 	rl.close();
 });
 
+/**
+ * Simple heuristic to guess if a string contains a city name.
+ * Looks for capitalized words, excluding common starting words.
+ * This is basic and might need refinement.
+ * @param input The user input string.
+ * @returns A potential city name string, or null.
+ */
+export function extractCityNameSimple(input: string): string | null {
+	const words = input.trim().split(/\s+/);
+	const potentialCities: string[] = [];
+	const commonStarts = new Set([
+		'what',
+		"what's",
+		'is',
+		'get',
+		'fetch',
+		'show',
+		'me',
+	]);
+
+	for (let i = 0; i < words.length; i++) {
+		const word = words[i];
+		// Check if it starts with a capital letter and is not a common starting word (if it's the first word)
+		if (
+			word.match(/^[A-Z]/) &&
+			(i > 0 || !commonStarts.has(word.toLowerCase()))
+		) {
+			// Collect consecutive capitalized words
+			let currentCity = word;
+			let j = i + 1;
+			while (j < words.length && words[j].match(/^[A-Z]/)) {
+				currentCity += ' ' + words[j];
+				j++;
+			}
+			potentialCities.push(currentCity);
+			i = j - 1; // Move index past the collected words
+		}
+	}
+
+	// Return the longest potential city name found, or null
+	if (potentialCities.length > 0) {
+		potentialCities.sort((a, b) => b.length - a.length);
+		return potentialCities[0];
+	}
+
+	return null;
+}
+
 console.log('CLI utilities initialized.');
