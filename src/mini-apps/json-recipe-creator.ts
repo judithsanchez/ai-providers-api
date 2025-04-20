@@ -1,4 +1,5 @@
-import {openaiClient} from '../core/openai-client.js'; // Import shared client
+import {AIProvider} from '../core/ai-provider.js';
+import {openaiClient} from '../core/openai-provider.js'; // Import provider
 import {rl, askQuestion} from '../core/cli-utils.js'; // Import shared CLI utils
 import {
 	ChatCompletionCreateParamsBase,
@@ -70,12 +71,9 @@ async function getRecipeJson(dishName: string): Promise<Recipe | null> {
 				temperature: 0.5,
 			};
 
-			// Use shared client and assert type
-			const completion = (await openaiClient.chat.completions.create(
-				config,
-			)) as ChatCompletion;
-
-			const responseContent = completion.choices[0].message.content;
+			// Use provider interface
+			const response = await openaiClient.createChatCompletion(config);
+			const responseContent = response.content;
 			if (!responseContent) {
 				console.error(
 					`Attempt ${

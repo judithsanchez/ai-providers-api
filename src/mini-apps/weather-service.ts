@@ -1,5 +1,4 @@
-import OpenAI from 'openai';
-// Removed duplicate import
+import {AIProvider} from '../core/ai-provider.js';
 import {ChatCompletionMessageParam} from 'openai/resources/chat/completions';
 
 // Architectural Pattern: Service Layer - Encapsulates business logic related to weather queries.
@@ -20,12 +19,12 @@ interface WeatherResult {
 }
 
 export class WeatherService {
-	private openai: OpenAI;
+	private aiProvider: AIProvider;
 	private messages: ChatCompletionMessageParam[] = [];
 	// No tools needed anymore for simulation
 
-	constructor(openaiClient: OpenAI) {
-		this.openai = openaiClient;
+	constructor(aiProvider: AIProvider) {
+		this.aiProvider = aiProvider;
 		this.messages = [
 			{
 				role: 'system',
@@ -150,14 +149,13 @@ export class WeatherService {
 		try {
 			// --- Step 1: Extract Location using OpenAI ---
 			console.log('AI Extracting Location...');
-			const response = await this.openai.chat.completions.create({
+			const response = await this.aiProvider.createChatCompletion({
 				model: 'gpt-4o-mini',
 				messages: extractionMessages,
-				temperature: 0, // Low temp for extraction
-				// No tools needed here
+				temperature: 0,
 			});
 
-			const extractedLocation = response.choices[0].message.content?.trim();
+			const extractedLocation = response.content.trim();
 
 			if (!extractedLocation || extractedLocation === 'UNKNOWN') {
 				return "Sorry, I couldn't determine the location you're asking about. Please specify a city.";

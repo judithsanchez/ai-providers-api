@@ -1,5 +1,5 @@
-// Note: dotenv is initialized in openai-client.ts
-import {openaiClient} from '../core/openai-client.js'; // Import shared client
+import {AIProvider} from '../core/ai-provider.js';
+import {openaiClient} from '../core/openai-provider.js'; // Import provider
 import {rl, askQuestion} from '../core/cli-utils.js'; // Import shared CLI utils
 import {WeatherService} from './weather-service.js'; // Import the service
 
@@ -9,7 +9,7 @@ import {WeatherService} from './weather-service.js'; // Import the service
 async function main() {
 	console.log('--- Real Weather App (Open-Meteo) ---');
 
-	// Instantiate the service, injecting the SHARED OpenAI client
+	// Instantiate the service, injecting the AI provider
 	const weatherService = new WeatherService(openaiClient);
 
 	let cityInput = ''; // Initialize cityInput

@@ -1,4 +1,5 @@
-import {openaiClient} from '../core/openai-client.js'; // Import shared client
+import {AIProvider} from '../core/ai-provider.js';
+import {openaiClient} from '../core/openai-provider.js'; // Import provider
 import {rl, askQuestion} from '../core/cli-utils.js'; // Import shared CLI utils
 import {
 	ChatCompletionMessageParam,
@@ -58,18 +59,16 @@ async function getAIResponse(): Promise<void> {
 	process.stdout.write('AI: ');
 	let aiSentence = '';
 	try {
-		// Use the shared client for streaming
-		const stream: Stream<ChatCompletionChunk> =
-			await openaiClient.chat.completions.create({
-				model: 'gpt-4o-mini',
-				messages: messages, // Pass the typed array
-				temperature: currentTemperature,
-				max_tokens: 20, // Strict token limit
-				stream: true,
-			});
+		// Use provider's streaming interface
+		const stream = openaiClient.createChatCompletionStream({
+			model: 'gpt-4o-mini',
+			messages: messages,
+			temperature: currentTemperature,
+			max_tokens: 20,
+		});
 
-		for await (const chunk of stream) {
-			const content = chunk.choices[0]?.delta?.content || '';
+		for await (const response of stream) {
+			const content = response.content;
 			process.stdout.write(content);
 			aiSentence += content;
 		}

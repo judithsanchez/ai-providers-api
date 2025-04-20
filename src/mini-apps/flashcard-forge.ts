@@ -1,4 +1,5 @@
-import {openaiClient} from '../core/openai-client.js'; // Import shared client
+import {AIProvider} from '../core/ai-provider.js'; // Import provider interface
+import {openaiClient} from '../core/openai-provider.js'; // Import concrete provider
 import {rl, askQuestion} from '../core/cli-utils.js'; // Import shared CLI utils
 import {
 	ChatCompletionCreateParamsBase,
@@ -35,6 +36,7 @@ interface FlashcardResponse {
 
 // --- Core Logic ---
 async function generateFlashcards(
+	aiProvider: AIProvider,
 	topic: string,
 	difficulty: Difficulty,
 	numCards: number,
@@ -79,11 +81,9 @@ IMPORTANT: Respond ONLY with a valid JSON object in this exact format. Ensure al
 
 	const startTime = Date.now();
 	// Use the imported shared client and assert the non-streaming type
-	const completion = (await openaiClient.chat.completions.create(
-		config,
-	)) as ChatCompletion; // Use the imported type for assertion
+	const response = await aiProvider.createChatCompletion(config);
 	const endTime = Date.now();
-	const rawResponse = completion.choices[0].message.content;
+	const rawResponse = response.content;
 
 	if (!rawResponse) {
 		throw new Error('Received empty response content from OpenAI.');
@@ -116,11 +116,11 @@ IMPORTANT: Respond ONLY with a valid JSON object in this exact format. Ensure al
 		flashcards: parsedResponse.flashcards,
 		metadata: parsedResponse.metadata,
 		performance: {
-			latency_ms: Math.round(endTime - startTime),
-			input_tokens: completion.usage?.prompt_tokens, // Use optional chaining
-			output_tokens: completion.usage?.completion_tokens,
-			total_tokens: completion.usage?.total_tokens,
-			model: completion.model,
+			latency_ms: response.metadata.latencyMs,
+			input_tokens: response.metadata.usage?.prompt_tokens,
+			output_tokens: response.metadata.usage?.completion_tokens,
+			total_tokens: response.metadata.usage?.total_tokens,
+			model: response.metadata.model,
 		},
 	};
 }
@@ -152,7 +152,13 @@ async function main() {
 
 		console.log('\nGenerating flashcards...\n');
 
-		const result = await generateFlashcards(topic, difficulty, numCards, style);
+		const result = await generateFlashcards(
+			openaiClient,
+			topic,
+			difficulty,
+			numCards,
+			style,
+		);
 
 		console.log(`Topic: ${result.metadata.topic}`); // Use metadata topic
 		console.log(`Cards Generated: ${result.flashcards.length}`);

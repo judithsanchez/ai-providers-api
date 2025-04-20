@@ -1,10 +1,7 @@
-import {openaiClient} from '../core/openai-client.js'; // Import shared client
+import {AIProvider} from '../core/ai-provider.js';
+import {openaiClient} from '../core/openai-provider.js'; // Import provider
 import {rl, getMultiLineInput} from '../core/cli-utils.js'; // Import shared CLI utils
-import {
-	ChatCompletion,
-	ChatCompletionCreateParamsBase,
-	ChatCompletionTokenLogprob, // Import logprob types
-} from 'openai/resources/chat/completions';
+import {ChatCompletionCreateParamsBase} from 'openai/resources/chat/completions';
 
 // --- Constants ---
 const MOODS: string[] = [
@@ -18,13 +15,12 @@ const MOODS: string[] = [
 	'casual',
 	'robotic',
 ];
-const TOP_K = 5; // Number of alternative tokens to show
 
 // --- Core API Call ---
 async function rewriteText(
 	originalText: string,
 	mood: string,
-): Promise<ChatCompletion | null> {
+): Promise<{content: string; metadata: any} | null> {
 	// Return type is ChatCompletion or null
 	try {
 		const config: ChatCompletionCreateParamsBase = {
@@ -41,16 +37,14 @@ async function rewriteText(
 				},
 			],
 			top_p: 0.9,
-			logprobs: true, // Request log probabilities
-			top_logprobs: TOP_K, // Request top K alternative tokens
 			max_tokens: 50, // Reduced max_tokens for short input
 			temperature: 0.7,
 		};
-		// Use shared client and assert the non-streaming type
-		const completion = (await openaiClient.chat.completions.create(
-			config,
-		)) as ChatCompletion;
-		return completion;
+		const response = await openaiClient.createChatCompletion(config);
+		return {
+			content: response.content,
+			metadata: response.metadata,
+		};
 	} catch (error) {
 		console.error(
 			'Error calling OpenAI API:',
@@ -61,46 +55,19 @@ async function rewriteText(
 }
 
 // --- Display Logic ---
-function displayResult(completion: ChatCompletion, selectedMood: string): void {
-	const rewrittenText = completion.choices[0].message.content;
-	// Type the logprobs content array
-	const allTokenLogprobs: ChatCompletionTokenLogprob[] | undefined | null =
-		completion.choices[0]?.logprobs?.content;
+function displayResult(
+	result: {content: string; metadata: any},
+	selectedMood: string,
+): void {
+	const rewrittenText = result.content;
 
 	console.log(`\n--- Rewritten Text (${selectedMood}) ---`);
 	console.log(rewrittenText ?? '(No text generated)');
 	console.log('-------------------------\n');
-
-	if (allTokenLogprobs && allTokenLogprobs.length > 0) {
-		console.log(`--- Token Logprobs (Top ${TOP_K} Alternatives) ---`);
-		allTokenLogprobs.forEach((tokenInfo, tokenIndex) => {
-			console.log(
-				`Token ${tokenIndex + 1}: "${
-					tokenInfo.token
-				}" (logprob: ${tokenInfo.logprob.toFixed(4)})`,
-			);
-			// Check if top_logprobs exists and has items
-			if (tokenInfo.top_logprobs && tokenInfo.top_logprobs.length > 0) {
-				tokenInfo.top_logprobs.forEach((logprobEntry, altIndex) => {
-					const probability = Math.exp(logprobEntry.logprob) * 100;
-					// Indicate the chosen token (which is tokenInfo.token)
-					const chosenMarker =
-						logprobEntry.token === tokenInfo.token ? ' (Chosen)' : '';
-					console.log(
-						`  ${altIndex + 1}. "${logprobEntry.token}" (${probability.toFixed(
-							2,
-						)}%)${chosenMarker}`,
-					);
-				});
-			} else {
-				console.log('  (No alternative logprobs available for this token)');
-			}
-			console.log(''); // Blank line between tokens
-		});
-		console.log('-------------------------------------------\n');
-	} else {
-		console.log('(Logprobs were not available in the response)');
-	}
+	console.log('Performance Metrics:');
+	console.log(`- Model: ${result.metadata.model}`);
+	console.log(`- Latency: ${result.metadata.latencyMs}ms`);
+	console.log(`- Tokens used: ${result.metadata.usage?.total_tokens ?? 'N/A'}`);
 }
 
 // --- Main Execution ---
